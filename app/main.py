@@ -10,11 +10,18 @@ from litestar.status_codes import HTTP_302_FOUND
 from app.config import Config
 from app.db import init_db
 from app.services import (
+    CLOSE_MIN_OBJECTS,
+    COUNT_MODE,
+    COUNT_MODE_LABEL,
+    close_acceptance,
     close_batch,
     get_batch,
     list_batches,
+    list_close_attempts,
     list_objects,
+    list_pulls,
     list_reports,
+    pull_manifest,
     register_object,
     run_visibility,
 )
@@ -111,6 +118,9 @@ async def api_meta(request: Request) -> dict:
         "lab_name": Config.LAB_NAME,
         "product_line": "cc-manifest-lab",
         "chain": ["落地批次", "对象登记", "清单闭合", "可见性对账"],
+        "close_threshold": CLOSE_MIN_OBJECTS,
+        "count_mode": COUNT_MODE,
+        "count_mode_label": COUNT_MODE_LABEL,
     }
 
 
@@ -142,7 +152,7 @@ async def api_register(request: Request, batch_id: int) -> Response:
         )
     except ServiceError as exc:
         return Response(
-            content={"ok": False, "error": exc.message},
+            content=exc.payload(),
             status_code=exc.status_code,
             media_type="application/json",
         )
@@ -160,16 +170,60 @@ async def api_close(request: Request, batch_id: int) -> Response:
         run = close_batch(batch_id)
     except ServiceError as exc:
         return Response(
-            content={"ok": False, "error": exc.message},
+            content=exc.payload(),
             status_code=exc.status_code,
             media_type="application/json",
         )
-    # silent: UI still celebrates close even for empty
     return Response(
-        content={"ok": True, "run": run},
+        content={
+            "ok": True,
+            "run": run,
+            "object_count": run["object_count"],
+            "threshold": run["threshold"],
+            "count_mode": run["count_mode"],
+            "count_mode_label": run["count_mode_label"],
+        },
         status_code=200,
         media_type="application/json",
     )
+
+
+@post("/api/batches/{batch_id:int}/manifest-pull")
+async def api_manifest_pull(request: Request, batch_id: int) -> Response:
+    """解析任务拉清单：空清单 / 未闭合 / 计数错位一律拒收。"""
+    require_user(request)
+    try:
+        manifest = pull_manifest(batch_id)
+    except ServiceError as exc:
+        return Response(
+            content=exc.payload(),
+            status_code=exc.status_code,
+            media_type="application/json",
+        )
+    return Response(
+        content={"ok": True, "manifest": manifest},
+        status_code=200,
+        media_type="application/json",
+    )
+
+
+@get("/api/manifest-pulls")
+async def api_manifest_pulls(request: Request) -> dict:
+    require_user(request)
+    return {"items": list_pulls()}
+
+
+@get("/api/close-attempts")
+async def api_close_attempts(request: Request, batch_id: int | None = None) -> dict:
+    require_user(request)
+    return {"items": list_close_attempts(batch_id=batch_id)}
+
+
+@get("/api/close-acceptance")
+async def api_close_acceptance(request: Request) -> dict:
+    """解析验收台数据：门槛、实有对象、空批拦截、空清单拒收。"""
+    require_user(request)
+    return close_acceptance()
 
 
 @get("/api/visibility-reports")
@@ -202,6 +256,10 @@ app = Litestar(
         api_batch_detail,
         api_register,
         api_close,
+        api_manifest_pull,
+        api_manifest_pulls,
+        api_close_attempts,
+        api_close_acceptance,
         api_reports,
         api_run_report,
         create_static_files_router(path="/static", directories=[str(STATIC)]),

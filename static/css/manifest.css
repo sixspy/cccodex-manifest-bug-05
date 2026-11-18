@@ -91,3 +91,41 @@ th { color: var(--muted); font-weight: 500; }
 }
 .muted { color: var(--muted); }
 .panel { margin-top: 1rem; padding-top: 0.5rem; border-top: 1px dashed var(--line); }
+.chip {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--muted);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.chip-ok { border-color: var(--accent); color: #062218; background: var(--accent); }
+.chip-danger { border-color: var(--danger); color: #2a0710; background: var(--danger); }
+.chip-warn { border-color: #ffd166; color: #2a1d00; background: #ffd166; }
+.chip-closed { border-color: var(--line); color: var(--ink); background: #1a4068; }
+.stat-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 0.6rem 0; }
+.stat {
+  min-width: 130px;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  background: #0d223a;
+}
+.stat span { display: block; color: var(--muted); font-size: 0.72rem; }
+.stat strong { font-size: 1.05rem; color: var(--ink); }
+.progress {
+  height: 10px;
+  border: 1px solid var(--line);
+  background: #0d223a;
+  margin: 0.5rem 0 0.25rem;
+}
+.progress > span { display: block; height: 100%; background: var(--accent); }
+.progress.lower > span { background: var(--danger); }
+.panel.empty { border-top-color: var(--danger); }
+.panel.empty h3 { color: var(--danger); }
+.danger-text { color: var(--danger); }
+.ok-text { color: var(--accent); }
+.gate-note { font-size: 0.85rem; margin: 0.35rem 0; }
+.attempt { font-size: 0.82rem; color: var(--muted); margin-top: 0.35rem; }

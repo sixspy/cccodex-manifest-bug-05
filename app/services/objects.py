@@ -2,10 +2,26 @@ from app.db import get_db
 
 
 class ServiceError(Exception):
-    def __init__(self, message: str, status_code: int = 400):
+    def __init__(
+        self,
+        message: str,
+        status_code: int = 400,
+        code: str = "",
+        details: dict | None = None,
+    ):
         super().__init__(message)
         self.message = message
         self.status_code = status_code
+        self.code = code
+        self.details = details or {}
+
+    def payload(self) -> dict:
+        return {
+            "ok": False,
+            "error": self.message,
+            "code": self.code,
+            **self.details,
+        }
 
 
 def list_objects(batch_id: int, db_path: str | None = None) -> list[dict]:
@@ -30,7 +46,7 @@ def register_object(
         raise ServiceError("对象键与内容指纹不能为空")
     if byte_size < 0:
         raise ServiceError("字节数不能为负")
-    with get_db(db_path) as conn:
+    with get_db(db_path, immediate=True) as conn:
         batch = conn.execute(
             "SELECT * FROM landing_batches WHERE id=?", (batch_id,)
         ).fetchone()

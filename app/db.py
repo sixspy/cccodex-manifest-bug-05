@@ -8,16 +8,26 @@ from app.config import Config
 def connect(db_path: str | None = None) -> sqlite3.Connection:
     path = db_path or Config.database()
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, check_same_thread=False)
+    conn = sqlite3.connect(path, check_same_thread=False, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 10000")
     return conn
 
 
 @contextmanager
-def get_db(db_path: str | None = None):
+def get_db(db_path: str | None = None, immediate: bool = False):
+    """Open a connection and commit/rollback around the block.
+
+    ``immediate=True`` grabs SQLite's write lock before the first read, so a
+    check-then-write sequence (e.g. 空批校验 + 闭合) is atomic across threads
+    and processes.  The second concurrent closer waits, then observes the
+    first one's committed state instead of double-succeeding.
+    """
     conn = connect(db_path)
     try:
+        if immediate:
+            conn.execute("BEGIN IMMEDIATE")
         yield conn
         conn.commit()
     except Exception:
@@ -61,6 +71,30 @@ CREATE TABLE IF NOT EXISTS close_runs (
   FOREIGN KEY(batch_id) REFERENCES landing_batches(id)
 );
 
+CREATE TABLE IF NOT EXISTS close_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch_id INTEGER NOT NULL,
+  object_count INTEGER NOT NULL,
+  threshold INTEGER NOT NULL,
+  count_mode TEXT NOT NULL,
+  accepted INTEGER NOT NULL,
+  code TEXT NOT NULL DEFAULT '',
+  message TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY(batch_id) REFERENCES landing_batches(id)
+);
+
+CREATE TABLE IF NOT EXISTS manifest_pulls (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch_id INTEGER NOT NULL,
+  accepted INTEGER NOT NULL,
+  object_count INTEGER NOT NULL,
+  code TEXT NOT NULL DEFAULT '',
+  message TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY(batch_id) REFERENCES landing_batches(id)
+);
+
 CREATE TABLE IF NOT EXISTS visibility_reports (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   as_of_date TEXT NOT NULL,
@@ -69,6 +103,7 @@ CREATE TABLE IF NOT EXISTS visibility_reports (
   object_count INTEGER NOT NULL,
   orphan_object_count INTEGER NOT NULL,
   mismatch_count INTEGER NOT NULL,
+  empty_closed_batch_count INTEGER NOT NULL DEFAULT 0,
   summary TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -87,9 +122,23 @@ SEED_BATCHES = [
 ]
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    """为既有库补列（CREATE TABLE IF NOT EXISTS 不会改老表）。"""
+    cols = {
+        r["name"]
+        for r in conn.execute("PRAGMA table_info(visibility_reports)").fetchall()
+    }
+    if "empty_closed_batch_count" not in cols:
+        conn.execute(
+            "ALTER TABLE visibility_reports "
+            "ADD COLUMN empty_closed_batch_count INTEGER NOT NULL DEFAULT 0"
+        )
+
+
 def init_db(db_path: str | None = None) -> None:
     with get_db(db_path) as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         row = conn.execute("SELECT value FROM meta WHERE key='seeded'").fetchone()
         if row:
             return
